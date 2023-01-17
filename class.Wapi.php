@@ -48,17 +48,15 @@ class WAPI
 
     private function processResult($result, $query)
     {
-        if(!isset($result['response']))
+        if(!isset($result['response']) OR !isset($result['response']['code']))
             throw new WAPI_Exception('FATAL ERROR', 0, $query);
 
         if($result['response']['code'] == 1000 AND !isset($result['response']['data'])) //everything ok, no response data
             return true;
         elseif($result['response']['code'] == 1000) //everything ok, return response data
             return $result['response'];
-        elseif(isset($result['response']['code'])) //something went wrong, return error code
+        else //something went wrong, return error code
             $this->returnError($result['response']['code'], $query);
-        else //total failure, return false
-            throw new WAPI_Exception('FATAL ERROR', 0, $query);
     }
 
     function ping()
