@@ -126,6 +126,8 @@ class WapiMysql
                         }
                     }
                 }
+
+                $wapi->domainCommit($domain['name']);
             }
             else
             {
@@ -298,7 +300,6 @@ class WapiMysql
             $res = $this->db->buildSql()->table('dns')->where(array('domains_id' => $domainId, 'id' => $matches[1]))->execute();
         else
             $res = $this->db->buildSql()->table('dns')->where(array('domains_id' => $domainId, 'row_id' => $dnsEntry['ID']))->execute();
-
 
         if($res->count())
         {
