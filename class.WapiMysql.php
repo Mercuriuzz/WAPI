@@ -1,21 +1,20 @@
 <?php
-/**
- * Created by PhpStorm.
- * User: mercuriuz
- * Date: 17.1.23
- * Time: 12:11
- */
 
-class WapiMysql
+
+class WAPI_Mysql
 {
     /* @var $db Database */
     private $db;
 
-    function __construct($db)
+    function __construct(Database $db)
     {
         $this->db = $db;
     }
 
+    /**
+     * @param array $accountsIds
+     * @param array $domains
+     */
     function updateDNSonWedos($accountsIds = array(), $domains = array())
     {
         if(!is_array($accountsIds) OR !is_array($domains))
@@ -28,7 +27,7 @@ class WapiMysql
         echo "Updating Wedos DNS...\n";
         echo "\n";
 
-        $accounts = $this->getAccounts($accountsIds);
+        $accounts = $this->getDbAccounts($accountsIds);
 
         foreach($accounts as $account)
         {
@@ -38,29 +37,19 @@ class WapiMysql
 
             $wapi = new WAPI($login, $pass);
 
-            try
-            {
-                $apiDomains = $wapi->domainsList();
-            }
-            catch (WAPI_Exception $e)
-            {
-                echo "\n";
-                echo "Error no. ".$e->getCode()."\n";
-                echo "Error: ".$e->getMessage()."\n";
-                echo "Query: ".$e->getQuery()."\n";
-                echo "\n";
-                echo "\n";
-                die();
-            }
+            $domainsListSql = $this->db->buildSql()->table('domains')->where(array('accounts_id' => $account['id']));
 
-            $domainsList = $apiDomains['data']['domain'];
+            if(count($domains))
+                $domainsListSql->where(array('name' => $domains));
 
-            foreach($domainsList as $domain)
+            $domainsList = $domainsListSql->execute();
+
+            if($domainsList->count())
             {
-                if(count($domains) AND in_array($domain['name'], $domains))
+                foreach($domainsList as $domain)
+                {
                     $this->updateDomainDnsOnWedos($account, $wapi, $domain);
-                elseif(count($domains) == 0) // update everything
-                    $this->updateDomainDnsOnWedos($account, $wapi, $domain);
+                }
             }
         }
     }
@@ -76,63 +65,88 @@ class WapiMysql
 
         echo "\n\t".'Updating DNS on domain '.$domain['name']."...\n";
 
-        if($resDomain->count())
+        try
         {
-            $dnsRecords = $this->db->buildSql()->table('dns')->where(array('domains_id' => $resDomain['id'], 'status' => array('UPDATE', 'CREATE', 'DELETE')))->execute();
-
-            if($dnsRecords->count())
+            if($resDomain->count())
             {
-                foreach($dnsRecords as $dnsRecord)
+                $dnsRecords = $this->db->buildSql()->table('dns')->where(array('domains_id' => $resDomain['id'], 'status' => array('UPDATE', 'CREATE', 'DELETE')))->execute();
+
+                if($dnsRecords->count())
                 {
-                    switch($dnsRecord['status'])
+                    foreach($dnsRecords as $dnsRecord)
                     {
-                        case 'UPDATE':
-                        {
-                            echo "\t   > ".'Calling update of '.$dnsRecord['type']." type record at ".($dnsRecord['name'] == "" ? $domain['name'] : $dnsRecord['name'].$domain['name'])." with value \"".$dnsRecord['data']."\"...\n";
-                            $response = $wapi->dnsRowUpdate($domain['name'], $dnsRecord['row_id'], $dnsRecord['ttl'], $dnsRecord['data']);
-
-                            if($response == true)
-                            {
-                                echo "\t   > Done. \n";
-                                $this->db->buildSql()->table('dns')->update(array('status' => 'ACTIVE'))->where(array('id' => $dnsRecord['id']))->execute();
-                            }
-                            else
-                                echo "\t   > Failed! \n";
-                        }
-                        break;
-                        case 'CREATE':
-                        {
-                            echo "\t   > ".'Calling create of '.$dnsRecord['type']." type record at ".($dnsRecord['name'] == "" ? $domain['name'] : $dnsRecord['name'].$domain['name'])." with value \"".$dnsRecord['data']."\"...\n";
-                            $response = $wapi->dnsRowAdd($domain['name'], $dnsRecord['name'], $dnsRecord['ttl'], $dnsRecord['type'], $dnsRecord['data'], $dnsRecord['id']);
-                            if($response == true)
-                                echo "\t   > Done. \n";
-                            else
-                                echo "\t   > Failed! \n";
-
-                        }
-                        break;
-                        case 'DELETE':
-                        {
-                            echo "\t   > ".'Calling deletion of '.$dnsRecord['type']." type record at ".($dnsRecord['name'] == "" ? $domain['name'] : $dnsRecord['name'].'.'.$domain['name'])." with value \"".$dnsRecord['data']."\"...\n";
-                            $response = $wapi->dnsRowDelete($domain['name'], $dnsRecord['row_id']);
-
-                            if($response == true)
-                            {
-                                echo "\t   > Done. \n";
-                                $this->db->buildSql()->table('dns')->update(array('status' => 'DELETED'))->where(array('id' => $dnsRecord['id']))->execute();
-                            }
-                            else
-                                echo "\t   > Failed! \n";
-                        }
+                        $this->updateDnsRecordOnWedos($wapi, $domain, $dnsRecord);
                     }
-                }
 
-                $wapi->domainCommit($domain['name']);
+                    echo "\t   > ".'Calling domain '.$domain['name']." commit.";
+                    $wapi->domainCommit($domain['name']);
+                }
+                else
+                {
+                    echo "\t   > ".'Nothing to do'."\n";
+                }
             }
-            else
+        }
+        catch(WAPI_Exception $e)
+        {
+            $e->handleError();
+        }
+    }
+
+    /**
+     * @param $wapi WAPI
+     * @param $dnsRecord
+     */
+    private function updateDnsRecordOnWedos($wapi, $domain, $dnsRecord)
+    {
+        try
+        {
+            switch($dnsRecord['status'])
             {
-                echo "\t   > ".'Nothing to do'."\n";
+                case 'UPDATE':
+                {
+                    echo "\t   > ".'Calling update of '.$dnsRecord['type']." type record at ".($dnsRecord['name'] == "" ? $domain['name'] : $dnsRecord['name'].'.'.$domain['name'])." with value \"".$dnsRecord['data']."\"...\n";
+                    $response = $wapi->dnsRowUpdate($domain['name'], $dnsRecord['row_id'], $dnsRecord['ttl'], $dnsRecord['data']);
+
+                    if($response == true)
+                    {
+                        echo "\t   > Done. \n";
+                        $this->db->buildSql()->table('dns')->update(array('status' => 'ACTIVE'))->where(array('id' => $dnsRecord['id']))->execute();
+                    }
+                    else
+                        echo "\t   > Failed! \n";
+                }
+                break;
+                case 'CREATE':
+                {
+                    echo "\t   > ".'Calling create of '.$dnsRecord['type']." type record at ".($dnsRecord['name'] == "" ? $domain['name'] : $dnsRecord['name'].'.'.$domain['name'])." with value \"".$dnsRecord['data']."\"...\n";
+                    $response = $wapi->dnsRowAdd($domain['name'], $dnsRecord['name'], $dnsRecord['ttl'], $dnsRecord['type'], $dnsRecord['data'], $dnsRecord['id']);
+                    if($response == true)
+                        echo "\t   > Done. \n";
+                    else
+                        echo "\t   > Failed! \n";
+
+                }
+                break;
+                case 'DELETE':
+                {
+                    echo "\t   > ".'Calling deletion of '.$dnsRecord['type']." type record at ".($dnsRecord['name'] == "" ? $domain['name'] : $dnsRecord['name'].'.'.$domain['name'])." with value \"".$dnsRecord['data']."\"...\n";
+                    $response = $wapi->dnsRowDelete($domain['name'], $dnsRecord['row_id']);
+
+                    if($response == true)
+                    {
+                        echo "\t   > Done. \n";
+                        $this->db->buildSql()->table('dns')->update(array('status' => 'DELETED'))->where(array('id' => $dnsRecord['id']))->execute();
+                    }
+                    else
+                        echo "\t   > Failed! \n";
+                }
+                break;
             }
+        }
+        catch(WAPI_Exception $e)
+        {
+
         }
     }
 
@@ -152,7 +166,7 @@ class WapiMysql
         echo "Updating domains in DB...\n";
         echo "\n";
 
-        $accounts = $this->getAccounts($accountsIds);
+        $accounts = $this->getDbAccounts($accountsIds);
 
         foreach($accounts as $account)
         {
@@ -166,15 +180,9 @@ class WapiMysql
             {
                 $apiDomains = $wapi->domainsList();
             }
-            catch (WAPI_Exception $e)
+            catch(WAPI_Exception $e)
             {
-                echo "\n";
-                echo "Error no. ".$e->getCode()."\n";
-                echo "Error: ".$e->getMessage()."\n";
-                echo "Query: ".$e->getQuery()."\n";
-                echo "\n";
-                echo "\n";
-                die();
+                $e->handleError();
             }
 
             $domainsList = $apiDomains['data']['domain'];
@@ -233,13 +241,7 @@ class WapiMysql
         }
         catch (WAPI_Exception $e)
         {
-            echo "\n";
-            echo "Error no. ".$e->getCode()."\n";
-            echo "Error: ".$e->getMessage()."\n";
-            echo "Query: ".$e->getQuery()."\n";
-            echo "\n";
-            echo "\n";
-            die();
+            $e->handleError();
         }
 
         $info = array('domains_id' => $domainId,
@@ -271,13 +273,7 @@ class WapiMysql
         }
         catch (WAPI_Exception $e)
         {
-            echo "\n";
-            echo "Error no. ".$e->getCode()."\n";
-            echo "Error: ".$e->getMessage()."\n";
-            echo "Query: ".$e->getQuery()."\n";
-            echo "\n";
-            echo "\n";
-            die();
+            $e->handleError();
         }
 
         $dnsEntries = $dns['data']['row'];
@@ -332,7 +328,7 @@ class WapiMysql
         return $entryId;
     }
 
-    private function getAccounts($ids = array())
+    private function getDbAccounts($ids = array())
     {
         $sql = $this->db->buildSql()->table('accounts');
 

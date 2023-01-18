@@ -26,6 +26,7 @@ class WAPI
         $query['request']['user'] = $this->login;
         $query['request']['auth'] = sha1($this->login.sha1($this->pass).date('H', time()));
         $query['request']['command'] = $command;
+
         if(isset($data))
             $query['request']['data'] = $data;
 
@@ -66,6 +67,13 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    function creditInfo()
+    {
+        $query = $this->buildQuery('credit-info');
+        $result = $this->query($query);
+        return $this->processResult($result, $query);
+    }
+
     function domainsList()
     {
         $query = $this->buildQuery('domains-list');
@@ -73,6 +81,24 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    /**
+     * @param $domain
+     * @param int $period - Years
+     * @return bool
+     * @throws WAPI_Exception
+     */
+    function domainsRenew($domain, $period = 1)
+    {
+        $query = $this->buildQuery('domain-renew', array('name' => $domain, 'period' => $period));
+        $result = $this->query($query);
+        return $this->processResult($result, $query);
+    }
+
+    /**
+     * @param $domain
+     * @return bool | array
+     * @throws WAPI_Exception
+     */
     function domainInfo($domain)
     {
         $query = $this->buildQuery('domain-info', array('name' => $domain));
@@ -80,6 +106,11 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    /**
+     * @param $domain
+     * @return bool | array
+     * @throws WAPI_Exception
+     */
     function dnsRowsList($domain)
     {
         $query = $this->buildQuery('dns-rows-list', array('domain' => $domain));
@@ -87,6 +118,16 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    /**
+     * @param $domain
+     * @param $name
+     * @param $ttl
+     * @param $type
+     * @param $data
+     * @param null $dbRowId
+     * @return bool
+     * @throws WAPI_Exception
+     */
     function dnsRowAdd($domain, $name, $ttl, $type, $data, $dbRowId = null)
     {
         $array = array('domain' => $domain, 'name' => $name, 'ttl' => $ttl, 'type' => $type, 'rdata' => $data);
@@ -98,6 +139,14 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    /**
+     * @param $domain
+     * @param $rowID
+     * @param $ttl
+     * @param $data
+     * @return bool
+     * @throws WAPI_Exception
+     */
     function dnsRowUpdate($domain, $rowID, $ttl, $data)
     {
         $array = array('domain' => $domain, 'row_id' => $rowID, 'ttl' => $ttl, 'rdata' => $data);
@@ -106,6 +155,12 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    /**
+     * @param $domain
+     * @param $rowID
+     * @return bool
+     * @throws WAPI_Exception
+     */
     function dnsRowDelete($domain, $rowID)
     {
         $query = $this->buildQuery('dns-row-delete', array('domain' => $domain, 'row_id' => $rowID));
@@ -113,6 +168,11 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    /**
+     * @param $domain
+     * @return bool
+     * @throws WAPI_Exception
+     */
     function domainCommit($domain)
     {
         $query = $this->buildQuery('dns-domain-commit', array('name' => $domain));
@@ -120,6 +180,11 @@ class WAPI
         return $this->processResult($result, $query);
     }
 
+    /**
+     * @param $errId
+     * @param $query
+     * @throws WAPI_Exception
+     */
     private function returnError($errId, $query)
     {
         $errors = array(1000 => 'OK',
@@ -339,5 +404,16 @@ class WAPI_Exception extends Exception
     public function getQuery()
     {
         return $this->query;
+    }
+
+    function handleError()
+    {
+        echo "\n";
+        echo "Error no. ".$this->getCode()."\n";
+        echo "Error: ".$this->getMessage()."\n";
+        echo "Query: ".$this->getQuery()."\n";
+        echo "\n";
+        echo "\n";
+        die();
     }
 }
